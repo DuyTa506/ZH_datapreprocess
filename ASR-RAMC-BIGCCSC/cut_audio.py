@@ -32,14 +32,14 @@ def process_audio_text_pairs(audio_folder, text_folder, output_parent_folder):
 
     for audio_file in audio_files:
         audio_path = os.path.join(audio_folder, audio_file)
-
-        text_file = os.path.splitext(audio_file)[0] + '.txt'
+        base_name = os.path.splitext(audio_file)[0]
+        text_file = base_name + '.txt'
         text_path = os.path.join(text_folder, text_file)
         if os.path.exists(text_path):
-            last_number = int(text_file.split('-')[-1].split('.')[0])
-            output_folder = os.path.join(output_parent_folder, str(last_number))
+            output_folder = os.path.join(output_parent_folder, str(base_name))
             os.makedirs(output_folder, exist_ok=True)
             cut_and_save_audio(audio_path, text_path, output_folder)
+
 
 
 if __name__ == "__main__":
