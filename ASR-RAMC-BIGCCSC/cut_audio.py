@@ -43,7 +43,7 @@ def process_audio_text_pairs(audio_folder, text_folder, output_parent_folder):
 
 
 if __name__ == "__main__":
-    prefix = "./ASR-RAMC-BIGCCSC/MDT2021S003"
+    prefix = "./ASR-RAMC-BIGCCSC/MDT2021S003/"
     audio_folder = 'WAV'
     text_folder = 'TXT'
     output_folder = './cleaned_ASR-RAMC'
