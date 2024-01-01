@@ -2,29 +2,36 @@ import argparse
 import os
 import shutil
 import threading
-
 import ijson
 from pydub import AudioSegment
 from tqdm import tqdm
 
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--wenetspeech_json',  type=str,    default='F:\音频数据\WenetSpeech数据集/WenetSpeech.json',  help="WenetSpeech的标注json文件路径")
-parser.add_argument('--annotation_dir',    type=str,    default='../dataset/annotation/',    help="存放数量列表的文件夹路径")
-parser.add_argument('--to_wav',            type=bool,   default=False,                       help="是否把opus格式转换为wav格式，以空间换时间")
-parser.add_argument('--num_workers',       type=int,    default=8,                           help="把opus格式转换为wav格式的线程数量")
+# Định nghĩa các tham số dòng lệnh
+parser = argparse.ArgumentParser(description="Chuẩn bị dữ liệu từ tập dữ liệu WenetSpeech.")
+parser.add_argument('--wenetspeech_json', type=str, default='/app/WenetSpeech/WenetSpeech/WenetSpeech.json',
+                    help="Đường dẫn đến tệp JSON chứa thông tin của WenetSpeech.")
+parser.add_argument('--annotation_dir', type=str, default='/app/ZH_datapreprocess/WenetSpeech/Cleaned_data',
+                    help="Thư mục chứa dữ liệu đã được xử lý.")
+parser.add_argument('--to_wav', type=bool, default=True,
+                    help="Chuyển đổi định dạng âm thanh từ opus sang wav.")
+parser.add_argument('--num_workers', type=int, default=24,
+                    help="Số luồng xử lý đồng thời khi chuyển đổi âm thanh.")
 args = parser.parse_args()
 
-
+# Kiểm tra và tạo thư mục chứa dữ liệu đã xử lý
 if not os.path.exists(args.annotation_dir):
     os.makedirs(args.annotation_dir)
-# 训练数据列表
+
+# Đường dẫn đến tệp JSON chứa thông tin của WenetSpeech
+wenetspeech_json = args.wenetspeech_json
+
+# Tạo tên cho tệp chứa dữ liệu đã xử lý
 train_list_path = os.path.join(args.annotation_dir, 'wenetspeech.json')
 f_ann = open(train_list_path, 'a', encoding='utf-8')
-# 测试数据列表
 test_list_path = os.path.join(args.annotation_dir, 'test.json')
 f_ann_test = open(test_list_path, 'a', encoding='utf-8')
 
-# 资源锁
+# Khóa tài nguyên cho việc ghi dữ liệu từ các luồng
 threadLock = threading.Lock()
 threads = []
 
@@ -36,12 +43,12 @@ class myThread(threading.Thread):
         self.data = data
 
     def run(self):
-        print(f"开启线程：{self.threadID}，数据大小为：{len(self.data)}" )
+        print(f"Khởi động luồng: {self.threadID}, số lượng dữ liệu: {len(self.data)}" )
         for i, data in enumerate(self.data):
             long_audio_path, segments_lists = data
-            print(f'线程：{self.threadID} 正在处理：[{i+1}/{len(self.data)}]')
+            print(f'Luồng: {self.threadID} đang xử lý: [{i+1}/{len(self.data)}]')
             lines = process_wenetspeech(long_audio_path, segments_lists)
-            # 获取锁
+            # Khóa để tránh xung đột khi ghi dữ liệu
             threadLock.acquire()
             for line in lines:
                 if long_audio_path.split('/')[-4] != 'train':
@@ -50,27 +57,33 @@ class myThread(threading.Thread):
                     f_ann.write('{}\n'.format(str(line).replace("'", '"')))
                 f_ann.flush()
                 f_ann_test.flush()
-            # 释放锁
+            # Mở khóa
             threadLock.release()
-        print(f"线程：{self.threadID} 已完成")
+        print(f"Luồng: {self.threadID} đã hoàn thành")
 
 
-# 处理WenetSpeech数据
+# Xử lý dữ liệu từ WenetSpeech
 def process_wenetspeech(long_audio_path, segments_lists):
     save_audio_path = long_audio_path.replace('.opus', '.wav')
     source_wav = AudioSegment.from_file(long_audio_path)
     target_audio = source_wav.set_frame_rate(16000)
+    print(f"---------------{save_audio_path}------------------")
     target_audio.export(save_audio_path, format="wav")
     lines = []
     for segment_file in segments_lists:
         try:
-            start_time = float(segment_file['begin_time'])
-            end_time = float(segment_file['end_time'])
-            text = segment_file['text']
+            subsets = segment_file['subsets']
             confidence = segment_file['confidence']
-            if confidence < 0.95: continue
+            if 'M' in subsets and confidence == 1.0:
+        
+                start_time = float(segment_file['begin_time'])
+                end_time = float(segment_file['end_time'])
+                text = segment_file['text']
+                
+                # if confidence < 0.95:
+                #     continue
         except Exception:
-            print(f'''Warning: {segment_file} something is wrong, skipped''')
+            print(f'''Cảnh báo: {segment_file} có lỗi, bỏ qua''')
             continue
         else:
             line = dict(audio_filepath=save_audio_path,
@@ -79,20 +92,20 @@ def process_wenetspeech(long_audio_path, segments_lists):
                         start_time=round(start_time, 3),
                         end_time=round(end_time, 3))
             lines.append(line)
-    # 删除已经处理过的音频
+    # Xóa file âm thanh đã xử lý
     os.remove(long_audio_path)
     return lines
 
 
-# 获取标注信息
+# Lấy thông tin từ tệp JSON chứa dữ liệu WenetSpeech
 def get_data(wenetspeech_json):
     data_list = []
     input_dir = os.path.dirname(wenetspeech_json)
     i = 0
-    # 开始读取数据，因为文件太大，无法获取进度
+    # Bắt đầu đọc dữ liệu
     with open(wenetspeech_json, 'r', encoding='utf-8') as f:
         objects = ijson.items(f, 'audios.item')
-        print("开始读取数据")
+        print("Bắt đầu đọc dữ liệu")
         while True:
             try:
                 long_audio = objects.__next__()
@@ -103,24 +116,24 @@ def get_data(wenetspeech_json):
                     segments_lists = long_audio['segments']
                     assert (os.path.exists(long_audio_path))
                 except AssertionError:
-                    print(f'''Warning: {long_audio_path} 不存在或者已经处理过自动删除了，跳过''')
+                    print(f'''Cảnh báo: {long_audio_path} không tồn tại hoặc đã được xử lý và tự động xóa, bỏ qua''')
                     continue
                 except Exception:
-                    print(f'''Warning: {aid} 数据读取错误，跳过''')
+                    print(f'''Cảnh báo: Lỗi khi đọc dữ liệu của {aid}, bỏ qua''')
                     continue
                 else:
                     data_list.append([long_audio_path.replace('\\', '/'), segments_lists])
             except StopIteration:
-                print("数据读取完成")
+                print("Hoàn tất việc đọc dữ liệu")
                 break
     return data_list
 
 
 def main():
     all_data = get_data(args.wenetspeech_json)
-    print(f'总数据量为：{len(all_data)}')
+    print(f'Tổng số dữ liệu: {len(all_data)}')
     if args.to_wav:
-        text = input(f'音频文件将会转换为wav格式，这个过程可能很长，而且最终文件大小接近5.5T，是否继续？(y/n)')
+        text = input(f'File âm thanh sẽ được chuyển đổi sang định dạng wav. Quá trình này có thể mất thời gian và kích thước file cuối cùng gần 5.5T. Bạn có muốn tiếp tục không? (y/n)')
         if text is None or text != 'y':
             return
         chunk_len = len(all_data) // args.num_workers
@@ -130,16 +143,16 @@ def main():
             thread.start()
             threads.append(thread)
 
-        # 等待所有线程完成
+        # Đợi cho tất cả các luồng hoàn thành
         for t in threads:
             t.join()
 
-        # 复制标注文件，因为有些标注文件已经转换为wav文件
+        # Sao chép tệp chú thích, vì một số tệp chú thích đã được chuyển đổi sang định dạng wav
         input_dir = os.path.dirname(args.wenetspeech_json)
         shutil.copy(train_list_path, os.path.join(input_dir, 'wenetspeech_train.json'))
         shutil.copy(test_list_path, os.path.join(input_dir, 'wenetspeech_test.json'))
     else:
-        text = input(f'将直接使用opus，值得注意的是opus读取速度会比wav格式慢很多，是否继续？(y/n)')
+        text = input(f'Sử dụng trực tiếp định dạng opus. Lưu ý rằng việc đọc opus sẽ chậm hơn nhiều so với định dạng wav. Bạn có muốn tiếp tục không? (y/n)')
         if text is None or text != 'y':
             return
         for data in tqdm(all_data):
@@ -149,7 +162,8 @@ def main():
                 end_time = float(segment_file['end_time'])
                 text = segment_file['text']
                 confidence = segment_file['confidence']
-                if confidence < 0.95: continue
+                if confidence < 0.95:
+                    continue
                 line = dict(audio_filepath=long_audio_path,
                             text=text,
                             duration=round(end_time - start_time, 3),
